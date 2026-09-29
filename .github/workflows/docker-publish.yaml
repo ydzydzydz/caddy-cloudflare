@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '0 18 * * *' # 每天 UTC 18:00（北京时间凌晨 2 点）
   workflow_dispatch:
+    inputs:
+      force:
+        description: '强制重新构建（跳过版本检查）'
+        required: false
+        type: boolean
+        default: false
 
 env:
   REGISTRY_GHCR: ghcr.io
@@ -49,6 +55,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Check if version already built
+        if: inputs.force != true
         id: check
         run: |
           IMAGE="${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}"
