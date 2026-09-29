@@ -1,0 +1,14 @@
+# example.zhuangzhuang.io -> 127.0.0.1:3008
+example.zhuangzhuang.io {
+	import tls-cloudflare
+
+	request_body {
+		max_size 20MB
+	}
+
+	reverse_proxy 127.0.0.1:3008 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up REMOTE-HOST {remote_host}
+	}
+}

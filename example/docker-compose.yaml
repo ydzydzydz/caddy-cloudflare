@@ -1,0 +1,20 @@
+services:
+  caddy:
+    image: ydzydzydz/caddy-cloudflare:latest
+    container_name: caddy
+    restart: unless-stopped
+    # host 网络模式：直接占用宿主机 80/443 端口，无需 ports 映射
+    network_mode: host
+    environment:
+      # Cloudflare API Token，需在宿主机环境变量或 .env 文件中提供
+      # Token 权限：Zone:Zone:Read + Zone:DNS:Edit
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./snippets:/etc/caddy/snippets:ro
+      - ./sites:/etc/caddy/sites:ro
+      # 数据目录（含自动签发的证书）映射到本地 ./data
+      # 证书路径：./data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/
+      - ./data:/data
+      # 配置目录映射到本地 ./config
+      - ./config:/config

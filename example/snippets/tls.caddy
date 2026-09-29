@@ -1,0 +1,6 @@
+# 通过 Cloudflare DNS challenge 自动签发证书（需在环境变量中提供 CLOUDFLARE_API_TOKEN）
+(tls-cloudflare) {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+}
