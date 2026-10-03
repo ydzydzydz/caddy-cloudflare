@@ -17,11 +17,71 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  determine-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.versions.outputs.matrix }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Determine versions to build
+        id: versions
+        run: |
+          FORCE=${{ inputs.force == true }}
+          # 拉取最近 10 个 release，过滤 pre-release 后取前 5 个，
+          # 避免一天内发多版时只取 latest 导致中间版本遗漏
+          VERSIONS=$(curl -sf "https://api.github.com/repos/caddyserver/caddy/releases?per_page=10" \
+            | jq -r '[.[] | select(.prerelease == false) | .tag_name | sub("^v"; "")] | .[0:5]')
+          echo "Recent releases: $VERSIONS"
+
+          TO_BUILD='[]'
+          FIRST=true
+          for v in $(echo "$VERSIONS" | jq -r '.[]'); do
+            # 只有真正最新的 release 才打 latest 标签
+            IS_LATEST=$FIRST
+            FIRST=false
+
+            # 若非强制重建，跳过已构建的版本
+            if [ "$FORCE" != "true" ]; then
+              if docker buildx imagetools inspect "${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}:${v}" > /dev/null 2>&1; then
+                echo "Version $v already built, skipping"
+                continue
+              fi
+            fi
+
+            # 用 Docker Hub REST API 检查官方基础镜像是否已发布
+            # 同时检查 -alpine 和 -builder，任一缺失都说明官方还没构建完，跳过等下次定时任务
+            ALPINE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://hub.docker.com/v2/repositories/library/caddy/tags/${v}-alpine")
+            BUILDER_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://hub.docker.com/v2/repositories/library/caddy/tags/${v}-builder")
+
+            if [ "$ALPINE_STATUS" = "200" ] && [ "$BUILDER_STATUS" = "200" ]; then
+              TO_BUILD=$(echo "$TO_BUILD" | jq \
+                --arg v "$v" \
+                --argjson latest "$IS_LATEST" \
+                '. + [{version: $v, is_latest: $latest}]')
+              echo "Version $v -> build (latest=$IS_LATEST)"
+            else
+              echo "Base images for $v not ready (alpine=$ALPINE_STATUS, builder=$BUILDER_STATUS), skipping"
+            fi
+          done
+
+          echo "matrix=$TO_BUILD" >> "$GITHUB_OUTPUT"
+          echo "Versions to build: $TO_BUILD"
+
   build-and-push:
+    needs: determine-versions
+    if: needs.determine-versions.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.determine-versions.outputs.matrix) }}
     env:
       # secrets 不能用于 if 表达式，通过 env 中转
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -29,13 +89,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Get latest Caddy version
-        id: caddy
-        run: |
-          VERSION=$(curl -sf https://api.github.com/repos/caddyserver/caddy/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Latest Caddy version: $VERSION"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -54,20 +107,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Check if version already built
-        if: inputs.force != true
-        id: check
-        run: |
-          IMAGE="${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}"
-          if docker buildx imagetools inspect "${IMAGE}:${{ steps.caddy.outputs.version }}" > /dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Version ${{ steps.caddy.outputs.version }} already built, skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Docker meta
-        if: steps.check.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -75,12 +115,11 @@ jobs:
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
             ${{ env.DOCKERHUB_USERNAME != '' && format('{0}/{1}', env.DOCKERHUB_USERNAME, github.event.repository.name) || '' }}
           tags: |
-            type=raw,value=latest
-            type=semver,pattern={{version}},value=${{ steps.caddy.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.caddy.outputs.version }}
+            type=raw,value=latest,enable=${{ matrix.is_latest }}
+            type=semver,pattern={{version}},value=${{ matrix.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ matrix.version }}
 
       - name: Build and push
-        if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -94,7 +133,7 @@ jobs:
             linux/s390x
           push: true
           build-args: |
-            CADDY_VERSION=${{ steps.caddy.outputs.version }}
+            CADDY_VERSION=${{ matrix.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
