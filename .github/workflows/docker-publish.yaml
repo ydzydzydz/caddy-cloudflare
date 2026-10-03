@@ -68,7 +68,8 @@ jobs:
             fi
           done
 
-          echo "matrix=$TO_BUILD" >> "$GITHUB_OUTPUT"
+          # GITHUB_OUTPUT 不支持值中含换行，用 jq -c 压缩成单行 JSON
+          echo "matrix=$(echo "$TO_BUILD" | jq -c .)" >> "$GITHUB_OUTPUT"
           echo "Versions to build: $TO_BUILD"
 
   build-and-push:
