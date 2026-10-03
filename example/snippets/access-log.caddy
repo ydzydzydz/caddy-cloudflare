@@ -1,0 +1,11 @@
+# 访问日志 snippet：在站点块中 import access-log 即可启用
+(access-log) {
+	log {
+		output file /var/log/caddy/{args.0}_access.log {
+			roll_size 100mb
+			roll_keep 1
+			roll_keep_for 24h
+		}
+		format console
+	}
+}

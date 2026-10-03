@@ -18,3 +18,5 @@ services:
       - ./data:/data
       # 配置目录映射到本地 ./config
       - ./config:/config
+      # 访问日志目录映射到本地 ./logs
+      - ./logs:/var/log/caddy

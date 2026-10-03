@@ -1,6 +1,7 @@
 # example.zhuangzhuang.io -> 127.0.0.1:3008
 example.zhuangzhuang.io {
 	import tls-cloudflare
+	import access-log example.zhuangzhuang.io
 
 	request_body {
 		max_size 20MB
